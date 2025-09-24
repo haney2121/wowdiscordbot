@@ -1,6 +1,7 @@
 const BASE_URL = "https://us.api.blizzard.com";
 import "dotenv/config";
 import { CharacterEquipment, EquippedItem } from '../types/blizzard.ts'
+import { configManager } from "../config/manager.ts";
 
 let token: string | null = null;
 let expiresAt: number | null = null;
@@ -46,14 +47,19 @@ async function blizzardFetch(url: string, token: string) {
 }
 
 // Fetch main character profile
-export async function getCharacterProfile(realm: string, name: string, token: string, namespace: string) {
-  const url = `${BASE_URL}/profile/wow/character/${realm}/${name}?namespace=${namespace}&locale=en_US`;
+export async function getCharacterProfile(guildId: string, token: string, name: string) {
+  // load config (realm + namespace) for this guild
+  const apiConfig = configManager.get<{realm: string, namespace:string}>(guildId);
+
+  const url = `${BASE_URL}/profile/wow/character/${apiConfig?.realm}/${name}?namespace=${apiConfig?.namespace}&locale=en_US`;
   return blizzardFetch(url, token);
 }
 
 // Fetch character media (portrait)
-export async function getCharacterMedia(realm: string, name: string, token: string, namespace: string) {
-  const url = `${BASE_URL}/profile/wow/character/${realm}/${name}/character-media?namespace=${namespace}&locale=en_US`;
+export async function getCharacterMedia(guildId: string, token: string, name: string) {
+  const apiConfig = configManager.get<{realm: string, namespace:string}>(guildId);
+
+  const url = `${BASE_URL}/profile/wow/character/${apiConfig?.realm}/${name}/character-media?namespace=${apiConfig?.namespace}&locale=en_US`;
   return blizzardFetch(url, token);
 }
 
@@ -84,6 +90,54 @@ export function getRarityEmoji(quality?: { type: string }): string {
       case "EPIC": return "🟣";     // Purple
       case "LEGENDARY": return "🟠"; // Orange/Gold
       default: return "⬜";
+    }
+  }
+  
+  export async function getItemLevelForPlayer(
+    playerName: string,
+    guildId: string
+  ): Promise<number | null> {
+    try {
+      const token = await getBlizzardToken();
+  
+      // load config (realm + namespace) for this guild
+  const apiConfig = configManager.get<{realm: string, namespace:string}>(guildId);
+      
+  
+      if (!apiConfig) {
+        console.warn(`No configuration set for server ${guildId}`);
+        return null;
+      }
+
+      const {realm} = apiConfig
+  
+      // 1. Fetch character profile
+      const profile = await getCharacterProfile(guildId, token, playerName.toLowerCase());
+      if (!profile?.id) {
+        console.warn(`Character not found: ${playerName}-${realm}`);
+        return null;
+      }
+  
+      // 2. Fetch equipment
+      if (!profile.equipment) {
+        console.warn(`No equipment link for: ${playerName}-${realm}`);
+        return null;
+      }
+  
+      const equipmentData: CharacterEquipment = await getCharacterEquipment(profile.equipment.href, token);
+      if (!equipmentData) return null;
+  
+      // 3. Calculate average ilvl
+      const items = equipmentData.equipped_items || [];
+      const levels = items.map(item => item.level?.value ?? 0).filter(v => v > 0);
+  
+      if (levels.length === 0) return null;
+  
+      const avgIlvl = Math.round(levels.reduce((a, b) => a + b, 0) / levels.length);
+      return avgIlvl;
+    } catch (err) {
+      console.error("Error fetching iLvl:", err);
+      return null;
     }
   }
   

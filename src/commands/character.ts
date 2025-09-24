@@ -1,7 +1,8 @@
-import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder, MessageFlags } from "discord.js";
 import { formatEquipment, getBlizzardToken, getRarityEmoji } from "../utils/blizzard.ts"; // <-- make sure .ts extension for ts-node
 import { getCharacterEquipment, getCharacterMedia, getCharacterSpec } from "../utils/blizzard.ts";
 import { getCharacterProfile } from "../utils/blizzard.ts";
+import { configManager } from "../config/manager.ts";
 
 export const data = new SlashCommandBuilder()
   .setName("character")
@@ -10,33 +11,29 @@ export const data = new SlashCommandBuilder()
     option.setName("name")
       .setDescription("Character name")
       .setRequired(true))
-  .addStringOption(option =>
-    option.setName("realm")
-      .setDescription("Realm name")
-      .setRequired(true))
-  .addStringOption(option =>
-    option.setName("namespace")
-      .setDescription("Game version/namespace")
-      .setRequired(true)
-      .addChoices(
-        { name: "Classic MoP", value: "profile-classic-us" },
-        { name: "Anniversary", value: "profile-classic1x-us" }
-      ));
 
 export const execute = async (interaction: ChatInputCommandInteraction) => {
+  const guildId = interaction.guildId!;
+  const apiConfig = configManager.get<{realm: string, namespace:string}>(guildId);
+
+  if (!apiConfig?.realm && !apiConfig?.namespace) {
+    await interaction.reply({
+      content: "⚠️ Missing realm and edition, configured for this server. Run `/config realm <realm>` first.",
+      flags: MessageFlags.Ephemeral
+    });
+    return;
+  }
+
+  
   const name = interaction.options.getString("name", true).toLowerCase();
-  const realm = interaction.options.getString("realm", true).toLowerCase();
-  const namespace = interaction.options.getString("namespace", true);
 
   await interaction.deferReply();
 
   try {
     const token = await getBlizzardToken();
 
-
-    const profile = await getCharacterProfile(realm, name, token, namespace);
-    console.log({profile})
-    const media = await getCharacterMedia(realm, name, token, namespace);
+    const profile = await getCharacterProfile(guildId, token, name);
+    const media = await getCharacterMedia(guildId, token, name);
     const equipment = profile.equipment ? await getCharacterEquipment(profile.equipment.href, token) : null;
     const specData = profile.specializations ? await getCharacterSpec(profile.specializations.href, token) : null;
     
